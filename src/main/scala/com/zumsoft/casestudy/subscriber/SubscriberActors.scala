@@ -9,6 +9,8 @@ import com.zumsoft.casestudy.publisher.PublisherMain.ReplyTo
 import io.circe.parser
 import org.apache.kafka.clients.consumer.Consumer
 
+import scala.collection.immutable.HashMap
+
 object Subscriber {
   def apply(kafkaConsumer: Consumer[String, String], topic: String): Behavior[ReplyTo] =
     Behaviors.setup(context => new Subscriber(context, kafkaConsumer, topic))
@@ -26,15 +28,26 @@ class Subscriber(context: ActorContext[ReplyTo], kafkaConsumer: Consumer[String,
       parser.decode[DeviceReading](record.value()) match {
         case Right(parsedDeviceReading) =>
           println(parsedDeviceReading)
-          // send device reading to aggregator actor
           message.replyTo ! parsedDeviceReading
-          // TODO send device data to DB
-
         case Left(ex) => s"There was an error parsing: $ex"
       }
     }
     Behaviors.same
   }
+}
+
+object Aggregator {
+  // TODO only pass deviceId and currentValue, no need to pass whole DeviceReading object
+  def apply(): Behavior[DeviceReading] = aggregate()
+
+  private def aggregate(aggregatedValues: Map[String, List[Float]] = HashMap[String, List[Float]]()): Behavior[DeviceReading] =
+    Behaviors.receive { (_, message) =>
+      def update(key: String, value: Float): Map[String, List[Float]] =
+      // If key exists for deviceId, appends currentValue to the underlying list, otherwise creates a new key with the value
+        aggregatedValues + (key -> (aggregatedValues.getOrElse(key, List[Float]()) :+ value))
+
+      aggregate(update(message.deviceId, message.currentValue))
+    }
 }
 
 object SubscriberMain {
@@ -43,10 +56,10 @@ object SubscriberMain {
     Behaviors.setup { context =>
       context.log.info("Bootstrapping SubscriberMain actors")
       val subscriber = context.spawn(Subscriber(kafkaConsumer, topic), "subscriber")
+      val aggregator = context.spawn(Aggregator(), "aggregator")
       Behaviors.receiveMessage { _ =>
-        // Provides the consumer actor ref to the aggregator actor
-        // TODO implement aggregator actor
-        //subscriber ! ReplyTo(aggregator)
+        // Provides the subscriber actor ref to the aggregator actor
+        subscriber ! ReplyTo(aggregator)
         Behaviors.same
       }
     }

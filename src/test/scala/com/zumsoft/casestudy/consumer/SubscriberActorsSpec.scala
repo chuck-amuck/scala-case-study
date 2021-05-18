@@ -6,7 +6,7 @@ import java.util
 import akka.actor.testkit.typed.scaladsl.ScalaTestWithActorTestKit
 import com.zumsoft.casestudy.publisher.Publisher.DeviceReading
 import com.zumsoft.casestudy.publisher.PublisherMain.ReplyTo
-import com.zumsoft.casestudy.subscriber.{Subscriber, SubscriberMain}
+import com.zumsoft.casestudy.subscriber.{Aggregator, Subscriber, SubscriberMain}
 import io.circe.generic.auto._
 import io.circe.syntax._
 import org.apache.kafka.clients.consumer.{ConsumerRecord, MockConsumer, OffsetResetStrategy}
@@ -37,6 +37,15 @@ class SubscriberActorsSpec extends ScalaTestWithActorTestKit with AnyWordSpecLik
       subscriber ! ReplyTo(replyProbe.ref)
 
       replyProbe.expectMessageType[DeviceReading] shouldBe deviceReading
+    }
+  }
+
+  "aggregator" must {
+    "aggregate DeviceInfo values" in {
+
+      val aggregator = spawn(Aggregator())
+      aggregator ! DeviceReading(java.util.UUID.randomUUID.toString, 0.1F, "unit", LocalDateTime.now().toString, 1)
+      // TODO write more comprehensive test
     }
   }
 
