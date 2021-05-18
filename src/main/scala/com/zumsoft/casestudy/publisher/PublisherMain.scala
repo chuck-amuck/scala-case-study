@@ -1,25 +1,20 @@
 package com.zumsoft.casestudy.publisher
 
+import java.time.LocalDateTime
+import java.util.UUID
+
+import akka.actor.typed.Behavior
 import akka.actor.typed.scaladsl.{AbstractBehavior, ActorContext, Behaviors}
-import akka.actor.typed.{ActorRef, Behavior}
-import com.zumsoft.casestudy.publisher.Publisher.DeviceReading
+import com.zumsoft.casestudy.models.{DeviceReading, ReplyTo}
 import org.apache.kafka.clients.producer.{Producer, ProducerRecord}
 
 object Helper {
-
-  import java.time.LocalDateTime
-
   def randomFloat(): Float = scala.util.Random.between(0F, 100F)
 
-  def now(): String = LocalDateTime.now.toString
-
-  def UUID(): String = java.util.UUID.randomUUID.toString
+  def UUID(): UUID = java.util.UUID.randomUUID
 }
 
 object Publisher {
-
-  final case class DeviceReading(deviceId: String, currentValue: Float, unit: String, timeStamp: String, version: Int)
-
   def apply(kafkaProducer: Producer[String, String], topic: String): Behavior[DeviceReading] =
     Behaviors.setup(context => new Publisher(context, kafkaProducer, topic))
 }
@@ -31,7 +26,6 @@ class Publisher(context: ActorContext[DeviceReading], kafkaProducer: Producer[St
   import io.circe.syntax._
 
   override def onMessage(message: DeviceReading): Behavior[DeviceReading] = {
-    context.log.info("Publisher received data: {}", message)
     val record = new ProducerRecord[String, String](topic, message.asJson.noSpaces)
     kafkaProducer.send(record)
     Behaviors.same
@@ -39,20 +33,18 @@ class Publisher(context: ActorContext[DeviceReading], kafkaProducer: Producer[St
 }
 
 object Device {
-
-  def apply(id: String, unit: String, version: Int): Behavior[PublisherMain.ReplyTo] = {
-    Behaviors.receive { (context, message) =>
+  def apply(id: UUID, unit: String, version: Int): Behavior[ReplyTo] = {
+    Behaviors.receive { (_, message) =>
       // `val name` can be obtained from context.self.path.name
-      message.replyTo ! Publisher.DeviceReading(id, Helper.randomFloat(), unit, Helper.now(), version)
+      message.replyTo.foreach { ref =>
+        ref ! DeviceReading(id, Helper.randomFloat(), unit, LocalDateTime.now, version)
+      }
       Behaviors.same
     }
   }
 }
 
 object PublisherMain {
-
-  final case class ReplyTo(replyTo: ActorRef[Publisher.DeviceReading])
-
   def apply(kafkaProducer: Producer[String, String], topic: String): Behavior[String] =
     Behaviors.setup { context =>
       context.log.info("Bootstrapping PublisherMain actors")

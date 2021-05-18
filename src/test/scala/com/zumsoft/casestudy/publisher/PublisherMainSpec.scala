@@ -3,19 +3,18 @@ package com.zumsoft.casestudy.publisher
 import java.time.LocalDateTime
 
 import akka.actor.testkit.typed.scaladsl.ScalaTestWithActorTestKit
-import com.zumsoft.casestudy.publisher.Publisher.DeviceReading
-import com.zumsoft.casestudy.publisher.PublisherMain.ReplyTo
+import com.zumsoft.casestudy.models.{DeviceReading, ReplyTo}
 import io.circe.generic.auto._
 import io.circe.parser
 import org.apache.kafka.clients.producer.MockProducer
 import org.apache.kafka.common.serialization.StringSerializer
 import org.scalatest.wordspec.AnyWordSpecLike
 
-class PublisherActorsSpec extends ScalaTestWithActorTestKit with AnyWordSpecLike {
+class PublisherMainSpec extends ScalaTestWithActorTestKit with AnyWordSpecLike {
 
   "device" must {
     "reply to ReplyTo message with DeviceReading" in {
-      val deviceId = java.util.UUID.randomUUID.toString
+      val deviceId = java.util.UUID.randomUUID
       val unit = "unit"
       val version = 1
       val device = spawn(Device(deviceId, unit, version))
@@ -26,7 +25,7 @@ class PublisherActorsSpec extends ScalaTestWithActorTestKit with AnyWordSpecLike
       message.deviceId shouldBe deviceId
       message.currentValue shouldBe 50F +- 50F
       message.unit shouldBe unit
-      LocalDateTime.parse(message.timeStamp).isBefore(LocalDateTime.now()) shouldBe true
+      message.timeStamp.isBefore(LocalDateTime.now()) shouldBe true
       message.version shouldBe version
     }
   }
@@ -36,21 +35,21 @@ class PublisherActorsSpec extends ScalaTestWithActorTestKit with AnyWordSpecLike
       val mockProducer = new MockProducer[String, String](true, new StringSerializer(), new StringSerializer())
       val topic = "test-topic"
       val publisher = spawn(Publisher(mockProducer, topic))
-      val deviceId = java.util.UUID.randomUUID.toString
+      val deviceId = java.util.UUID.randomUUID
       val unit = "unit"
-      val time = LocalDateTime.now().toString
+      val time = LocalDateTime.now()
       val version = 1
       val deviceReading = DeviceReading(deviceId, 0.1F, unit, time, version)
       publisher ! deviceReading
 
-      // TODO wait for call to be made to mock without sleep
+      // TODO avoid using thread sleep while waiting for message to be processed
       Thread.sleep(500)
 
       mockProducer.history.size shouldBe 1
-      parser.decode[DeviceReading](mockProducer.history.get(0).value()) match {
-        case Right(parsedDeviceReading) => parsedDeviceReading shouldBe deviceReading
-        case Left(ex) => s"There was an error parsing: $ex"
+      val parsedDeviceReading = parser.decode[DeviceReading](mockProducer.history.get(0).value()) match {
+        case Right(parsedDeviceReading) => parsedDeviceReading
       }
+      parsedDeviceReading shouldBe deviceReading
     }
   }
 

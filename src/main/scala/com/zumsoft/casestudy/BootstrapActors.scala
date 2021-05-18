@@ -10,6 +10,7 @@ import com.zumsoft.casestudy.subscriber.SubscriberMain
 import org.apache.kafka.clients.consumer.{Consumer, ConsumerConfig, KafkaConsumer}
 import org.apache.kafka.clients.producer.{KafkaProducer, Producer, ProducerConfig}
 import org.apache.kafka.common.serialization.{StringDeserializer, StringSerializer}
+import scalikejdbc.ConnectionPool
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.{Duration, _}
@@ -19,15 +20,20 @@ object BootstrapActors extends App {
   private val caseStudyConfig = CaseStudyConfig.load(config)
   private val kafkaProducerConfig = caseStudyConfig.kafkaProducerConfig
   private val kafkaConsumerConfig = caseStudyConfig.kafkaConsumerConfig
+  private val postgresConfig = caseStudyConfig.postgresConfig
+  // Create connection pool for Postgres
+  ConnectionPool.singleton(postgresConfig.url, postgresConfig.user, postgresConfig.password)
 
-
+  // Initialize PublisherMain actorsystem
   private val publisherMain: ActorSystem[String] = ActorSystem(PublisherMain(initializeProducer(kafkaProducerConfig), kafkaProducerConfig.topic), "PublisherMain")
+  // Initialize SubscriberMain actorsystem
   private val subscriberMain: ActorSystem[String] = ActorSystem(SubscriberMain(initializeConsumer(kafkaConsumerConfig), kafkaConsumerConfig.topic), "SubscriberMain")
   // Scheduled message every 3 seconds to the PublisherMain guardian actor
   publisherMain.scheduler.scheduleAtFixedRate(Duration.Zero, 3.seconds)(() => publisherMain ! "start")
   // Scheduled message every 3 seconds to the SubscriberMain guardian actor
   subscriberMain.scheduler.scheduleAtFixedRate(Duration.Zero, 3.seconds)(() => subscriberMain ! "start")
 
+  // TODO move initialize logic to helper
   private def initializeProducer(config: KafkaProducerConfig): Producer[String, String] = {
     val props = new Properties()
     props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, s"${config.host}:${config.port}")

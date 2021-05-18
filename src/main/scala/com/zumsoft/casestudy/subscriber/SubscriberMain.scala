@@ -1,11 +1,11 @@
 package com.zumsoft.casestudy.subscriber
 
 import java.time.Duration
+import java.util.UUID
 
 import akka.actor.typed.Behavior
 import akka.actor.typed.scaladsl.{AbstractBehavior, ActorContext, Behaviors}
-import com.zumsoft.casestudy.publisher.Publisher.DeviceReading
-import com.zumsoft.casestudy.publisher.PublisherMain.ReplyTo
+import com.zumsoft.casestudy.models.{DeviceReading, ReplyTo}
 import io.circe.parser
 import org.apache.kafka.clients.consumer.Consumer
 
@@ -26,11 +26,32 @@ class Subscriber(context: ActorContext[ReplyTo], kafkaConsumer: Consumer[String,
   override def onMessage(message: ReplyTo): Behavior[ReplyTo] = {
     kafkaConsumer.poll(Duration.ofSeconds(3)).records(topic).forEach { record =>
       parser.decode[DeviceReading](record.value()) match {
-        case Right(parsedDeviceReading) =>
-          println(parsedDeviceReading)
-          message.replyTo ! parsedDeviceReading
+        case Right(deviceReading) =>
+          message.replyTo.foreach(ref => ref ! deviceReading)
         case Left(ex) => s"There was an error parsing: $ex"
       }
+    }
+    Behaviors.same
+  }
+}
+
+object DBWriter {
+  def apply(): Behavior[DeviceReading] =
+    Behaviors.setup(context => new DBWriter(context))
+}
+
+class DBWriter(context: ActorContext[DeviceReading]) extends AbstractBehavior[DeviceReading](context) {
+
+  import scalikejdbc._
+
+  // TODO investigate the feasibility of batching
+  // TODO use async library for DB connection
+  // TODO use QueryDSL for insert
+  override def onMessage(message: DeviceReading): Behavior[DeviceReading] = {
+    DB localTx { implicit session =>
+      sql"""insert into device_readings (id, value, unit, timestamp, version) values (${message.deviceId}, ${message.currentValue},
+            ${message.unit}, ${message.timeStamp}, ${message.version})"""
+        .update().apply()
     }
     Behaviors.same
   }
@@ -40,10 +61,11 @@ object Aggregator {
   // TODO only pass deviceId and currentValue, no need to pass whole DeviceReading object
   def apply(): Behavior[DeviceReading] = aggregate()
 
-  private def aggregate(aggregatedValues: Map[String, List[Float]] = HashMap[String, List[Float]]()): Behavior[DeviceReading] =
+  // TODO introduce logic to configure maximum size of collection of values and add automatic eviction
+  private def aggregate(aggregatedValues: Map[UUID, List[Float]] = HashMap[UUID, List[Float]]()): Behavior[DeviceReading] =
     Behaviors.receive { (_, message) =>
-      def update(key: String, value: Float): Map[String, List[Float]] =
-      // If key exists for deviceId, appends currentValue to the underlying list, otherwise creates a new key with the value
+      // If key exists for deviceId, appends currentValue to the underlying list, otherwise creates a new key with the value converted to a list
+      def update(key: UUID, value: Float): Map[UUID, List[Float]] =
         aggregatedValues + (key -> (aggregatedValues.getOrElse(key, List[Float]()) :+ value))
 
       aggregate(update(message.deviceId, message.currentValue))
@@ -51,15 +73,15 @@ object Aggregator {
 }
 
 object SubscriberMain {
-
   def apply(kafkaConsumer: Consumer[String, String], topic: String): Behavior[String] =
     Behaviors.setup { context =>
       context.log.info("Bootstrapping SubscriberMain actors")
       val subscriber = context.spawn(Subscriber(kafkaConsumer, topic), "subscriber")
       val aggregator = context.spawn(Aggregator(), "aggregator")
+      val dBWriter = context.spawn(DBWriter(), "dbwriter")
       Behaviors.receiveMessage { _ =>
-        // Provides the subscriber actor ref to the aggregator actor
-        subscriber ! ReplyTo(aggregator)
+        // Provides the aggregator and dbwriter actor refs to the subscriber actor
+        subscriber ! ReplyTo(Set(aggregator, dBWriter))
         Behaviors.same
       }
     }
