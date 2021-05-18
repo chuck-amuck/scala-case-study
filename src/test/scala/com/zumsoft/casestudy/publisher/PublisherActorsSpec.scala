@@ -1,19 +1,19 @@
-package com.zumsoft.casestudy.publish
+package com.zumsoft.casestudy.publisher
 
 import java.time.LocalDateTime
 
 import akka.actor.testkit.typed.scaladsl.ScalaTestWithActorTestKit
-import com.zumsoft.casestudy.publish.Publisher.DeviceReading
-import com.zumsoft.casestudy.publish.PublisherMain.ReplyTo
+import com.zumsoft.casestudy.publisher.Publisher.DeviceReading
+import com.zumsoft.casestudy.publisher.PublisherMain.ReplyTo
 import io.circe.generic.auto._
-import io.circe.parser._
+import io.circe.parser
 import org.apache.kafka.clients.producer.MockProducer
 import org.apache.kafka.common.serialization.StringSerializer
 import org.scalatest.wordspec.AnyWordSpecLike
 
-class PublishActorsSpec extends ScalaTestWithActorTestKit with AnyWordSpecLike {
+class PublisherActorsSpec extends ScalaTestWithActorTestKit with AnyWordSpecLike {
 
-  "A device" must {
+  "device" must {
     "reply to ReplyTo message with DeviceReading" in {
       val deviceId = java.util.UUID.randomUUID.toString
       val unit = "unit"
@@ -31,8 +31,8 @@ class PublishActorsSpec extends ScalaTestWithActorTestKit with AnyWordSpecLike {
     }
   }
 
-  "A publisher" must {
-    "receive a DeviceReading and publish DeviceData to kafka" in {
+  "publisher" must {
+    "receive a DeviceReading and publish DeviceData to Kafka" in {
       val mockProducer = new MockProducer[String, String](true, new StringSerializer(), new StringSerializer())
       val topic = "test-topic"
       val publisher = spawn(Publisher(mockProducer, topic))
@@ -47,10 +47,9 @@ class PublishActorsSpec extends ScalaTestWithActorTestKit with AnyWordSpecLike {
       Thread.sleep(500)
 
       mockProducer.history.size shouldBe 1
-      parse(mockProducer.history.get(0).value()) match {
-        case Right(json) => json.as[DeviceReading] match {
-          case Right(parsedDeviceReading) => parsedDeviceReading shouldBe deviceReading
-        }
+      parser.decode[DeviceReading](mockProducer.history.get(0).value()) match {
+        case Right(parsedDeviceReading) => parsedDeviceReading shouldBe deviceReading
+        case Left(ex) => s"There was an error parsing: $ex"
       }
     }
   }

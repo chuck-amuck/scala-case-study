@@ -1,8 +1,8 @@
-package com.zumsoft.casestudy.publish
+package com.zumsoft.casestudy.publisher
 
 import akka.actor.typed.scaladsl.{AbstractBehavior, ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, Behavior}
-import com.zumsoft.casestudy.publish.Publisher.DeviceReading
+import com.zumsoft.casestudy.publisher.Publisher.DeviceReading
 import org.apache.kafka.clients.producer.{Producer, ProducerRecord}
 
 object Helper {
@@ -23,6 +23,7 @@ object Publisher {
   def apply(kafkaProducer: Producer[String, String], topic: String): Behavior[DeviceReading] =
     Behaviors.setup(context => new Publisher(context, kafkaProducer, topic))
 }
+
 // TODO use dependency injection to provide the kafka producer and topic
 class Publisher(context: ActorContext[DeviceReading], kafkaProducer: Producer[String, String], topic: String) extends AbstractBehavior[DeviceReading](context) {
 
@@ -40,13 +41,9 @@ class Publisher(context: ActorContext[DeviceReading], kafkaProducer: Producer[St
 object Device {
 
   def apply(id: String, unit: String, version: Int): Behavior[PublisherMain.ReplyTo] = {
-    val deviceId = id
-    val readingUnit = unit
-    val deviceVersion = version
-    // val createdAt = Helper.now()
-    // `val name` can be obtained from context.self.path.name
     Behaviors.receive { (context, message) =>
-      message.replyTo ! Publisher.DeviceReading(deviceId, Helper.randomFloat(), readingUnit, Helper.now(), deviceVersion)
+      // `val name` can be obtained from context.self.path.name
+      message.replyTo ! Publisher.DeviceReading(id, Helper.randomFloat(), unit, Helper.now(), version)
       Behaviors.same
     }
   }
@@ -58,13 +55,12 @@ object PublisherMain {
 
   def apply(kafkaProducer: Producer[String, String], topic: String): Behavior[String] =
     Behaviors.setup { context =>
-      context.log.info("Bootstrapping actors")
+      context.log.info("Bootstrapping PublisherMain actors")
       val device1 = context.spawn(Device(Helper.UUID(), "Fahrenheit", 1), "thermostat")
       val device2 = context.spawn(Device(Helper.UUID(), "Fahrenheit", 1), "water_heater")
       val device3 = context.spawn(Device(Helper.UUID(), "Fahrenheit", 3), "hvac")
       val device4 = context.spawn(Device(Helper.UUID(), "Watts", 2), "elevator")
       val device5 = context.spawn(Device(Helper.UUID(), "RPM", 5), "fan")
-
       val publisher = context.spawn(Publisher(kafkaProducer, topic), "publisher")
 
       Behaviors.receiveMessage { _ =>
